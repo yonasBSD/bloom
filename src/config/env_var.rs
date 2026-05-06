@@ -4,9 +4,10 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
+use std::net::SocketAddr;
+
 use regex::Regex;
 use serde::{de, Deserialize, Deserializer};
-use std::net::SocketAddr;
 use toml::Value;
 
 #[derive(Deserialize, PartialEq)]

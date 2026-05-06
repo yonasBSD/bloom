@@ -4,13 +4,14 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use rand::distr::Alphanumeric;
-use rand::{self, RngExt};
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::result::Result;
 use std::str;
 use std::time::Duration;
+
+use rand::distr::Alphanumeric;
+use rand::{self, RngExt};
 
 use super::command::ControlCommand;
 use super::command::ControlCommandResponse;

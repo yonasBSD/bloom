@@ -4,8 +4,9 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::header::{HeaderName, HeaderValue};
 use std::fmt;
+
+use hyper::header::{HeaderName, HeaderValue};
 
 #[derive(Clone)]
 pub struct HeaderRequestBloomRequestShard(pub u8);

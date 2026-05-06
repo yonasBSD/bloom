@@ -4,8 +4,9 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::header::{self, HeaderMap, HeaderValue};
 use std::str::from_utf8;
+
+use hyper::header::{self, HeaderMap, HeaderValue};
 
 use super::defaults;
 use crate::header::request_shard::HeaderRequestBloomRequestShard;
