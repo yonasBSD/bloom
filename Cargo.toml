@@ -30,8 +30,7 @@ hyper = { version = "1.9", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1"] }
 tokio = { version = "1.52", features = ["rt-multi-thread"] }
 r2d2 = "0.8"
-r2d2_redis = "0.14"
-redis = "0.20"
+redis = "1.2"
 farmhash = "1.1"
 brotli = "8.0"
 rand = "0.10"

@@ -10,8 +10,7 @@ use std::time::Duration;
 
 use brotli::{CompressorReader as BrotliCompressor, Decompressor as BrotliDecompressor};
 use r2d2::Pool;
-use r2d2_redis::RedisConnectionManager;
-use redis::{self, Commands, Value};
+use redis::{self, Client, Commands, Connection, ConnectionLike, RedisError, Value};
 
 use super::route::ROUTE_PREFIX;
 use crate::APP_CONF;
@@ -23,10 +22,14 @@ static KEY_FINGERPRINT: &'static str = "f";
 static KEY_TAGS: &'static str = "t";
 static KEY_TAGS_SEPARATOR: &'static str = ",";
 
+struct CacheStoreConnection {
+    client: Client,
+}
+
 pub struct CacheStoreBuilder;
 
 pub struct CacheStore {
-    pool: Pool<RedisConnectionManager>,
+    pool: Pool<CacheStoreConnection>,
 }
 
 #[derive(Debug)]
@@ -66,7 +69,7 @@ impl CacheStoreBuilder {
 
         debug!("will connect to redis at: {}", tcp_addr_raw);
 
-        match RedisConnectionManager::new(tcp_addr_raw.as_ref()) {
+        match CacheStoreConnection::new(tcp_addr_raw.as_ref()) {
             Ok(manager) => {
                 let builder = Pool::builder()
                     .test_on_check_out(false)
@@ -105,12 +108,14 @@ impl CacheStore {
 
         tokio::task::spawn_blocking(move || {
             get_cache_store_client_try!(pool, CacheStoreError::Disconnected, client {
-                match (*client).hget::<_, _, (Value, Value)>(key, (KEY_FINGERPRINT, KEY_TAGS)) {
-                    Ok(value) => {
-                        match value {
-                            (Value::Data(fingerprint_bytes), tags_bytes) => {
+                match (*client).hmget::<_, _, Vec<Value>>(key, &[KEY_FINGERPRINT, KEY_TAGS]) {
+                    Ok(values) => {
+                        let mut values_iter = values.into_iter();
+
+                        match (values_iter.next(), values_iter.next()) {
+                            (Some(Value::BulkString(fingerprint_bytes)), Some(tags_bytes)) => {
                                 // Parse tags and bump their last access time
-                                if let Value::Data(tags_bytes_data) = tags_bytes {
+                                if let Value::BulkString(tags_bytes_data) = tags_bytes {
                                     if let Ok(tags_data) = String::from_utf8(
                                         tags_bytes_data) {
                                         if tags_data.is_empty() == false {
@@ -170,7 +175,7 @@ impl CacheStore {
                                     Err(CacheStoreError::Corrupted)
                                 }
                             },
-                            (Value::Nil, _) => Ok(None),
+                            (Some(Value::Nil), _) | (None, _) => Ok(None),
                             _ => Err(CacheStoreError::Invalid),
                         }
                     },
@@ -190,7 +195,7 @@ impl CacheStore {
                 match (*client).hget::<_, _, Value>(key, KEY_BODY) {
                     Ok(value) => {
                         match value {
-                            Value::Data(body_bytes_raw) => {
+                            Value::BulkString(body_bytes_raw) => {
                                 let body_bytes_result =
                                 if APP_CONF.cache.compress_body == true {
                                     // Decompress raw bytes
@@ -319,11 +324,11 @@ impl CacheStore {
                                 ).ignore();
                             }
 
-                            pipeline.expire(&key, ttl_cap).ignore();
+                            pipeline.expire(&key, ttl_cap as i64).ignore();
 
                             for key_tag in key_tags {
                                 pipeline.sadd(&key_tag.0, &key_mask).ignore();
-                                pipeline.expire(&key_tag.0, APP_CONF.redis.max_key_expiration);
+                                pipeline.expire(&key_tag.0, APP_CONF.redis.max_key_expiration as i64);
                             }
 
                             // Bucket (MULTI operation for main data + bucket marker)
@@ -392,5 +397,30 @@ impl CachePurgeVariant {
                 "#
             }
         }
+    }
+}
+
+impl CacheStoreConnection {
+    fn new(url: &str) -> Result<Self, RedisError> {
+        Ok(Self {
+            client: Client::open(url)?,
+        })
+    }
+}
+
+impl r2d2::ManageConnection for CacheStoreConnection {
+    type Connection = Connection;
+    type Error = RedisError;
+
+    fn connect(&self) -> Result<Connection, RedisError> {
+        self.client.get_connection()
+    }
+
+    fn is_valid(&self, conn: &mut Connection) -> Result<(), RedisError> {
+        redis::cmd("PING").query(conn)
+    }
+
+    fn has_broken(&self, conn: &mut Connection) -> bool {
+        !conn.is_open()
     }
 }
