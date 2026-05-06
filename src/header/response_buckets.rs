@@ -4,29 +4,34 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::header::{parsing, Formatter, Header, Raw};
-use hyper::Result;
+use hyper::header::{HeaderName, HeaderValue};
 use std::fmt;
 
 #[derive(Clone)]
 pub struct HeaderResponseBloomResponseBuckets(pub Vec<String>);
 
-impl Header for HeaderResponseBloomResponseBuckets {
-    fn header_name() -> &'static str {
-        "Bloom-Response-Buckets"
+impl HeaderResponseBloomResponseBuckets {
+    pub fn header_name() -> HeaderName {
+        HeaderName::from_static("bloom-response-buckets")
     }
 
-    fn parse_header(raw: &Raw) -> Result<HeaderResponseBloomResponseBuckets> {
-        parsing::from_comma_delimited(raw).map(HeaderResponseBloomResponseBuckets)
-    }
-
-    fn fmt_header(&self, f: &mut Formatter) -> fmt::Result {
-        f.fmt_line(self)
+    pub fn from_header_value(value: &HeaderValue) -> Option<Self> {
+        value
+            .to_str()
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|bucket| bucket.trim().to_string())
+                    .filter(|bucket| !bucket.is_empty())
+                    .collect()
+            })
+            .map(HeaderResponseBloomResponseBuckets)
     }
 }
 
 impl fmt::Display for HeaderResponseBloomResponseBuckets {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        parsing::fmt_comma_delimited(f, &self.0)
+        write!(f, "{}", self.0.join(", "))
     }
 }

@@ -50,6 +50,9 @@ pub struct ConfigProxy {
     #[serde(default = "defaults::proxy_shard_default")]
     pub shard_default: u8,
 
+    #[serde(default = "defaults::proxy_tunnel_clients")]
+    pub tunnel_clients: u16,
+
     pub shard: Vec<ConfigProxyShard>,
 }
 

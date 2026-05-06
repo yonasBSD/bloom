@@ -26,6 +26,10 @@ pub fn proxy_shard_default() -> u8 {
     0
 }
 
+pub fn proxy_tunnel_clients() -> u16 {
+    32
+}
+
 pub fn proxy_shard_shard() -> u8 {
     0
 }

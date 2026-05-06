@@ -4,10 +4,8 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::header::{Formatter, Header, Raw};
-use hyper::{Error, Result};
+use hyper::header::{HeaderName, HeaderValue};
 use std::fmt;
-use std::str;
 
 #[derive(Clone)]
 pub enum HeaderBloomStatusValue {
@@ -22,7 +20,7 @@ pub enum HeaderBloomStatusValue {
 pub struct HeaderBloomStatus(pub HeaderBloomStatusValue);
 
 impl HeaderBloomStatusValue {
-    fn to_str(&self) -> &str {
+    fn to_str(&self) -> &'static str {
         match *self {
             HeaderBloomStatusValue::Hit => "HIT",
             HeaderBloomStatusValue::Miss => "MISS",
@@ -33,33 +31,19 @@ impl HeaderBloomStatusValue {
     }
 }
 
-impl Header for HeaderBloomStatus {
-    fn header_name() -> &'static str {
-        "Bloom-Status"
+impl HeaderBloomStatus {
+    pub fn header_name() -> HeaderName {
+        HeaderName::from_static("bloom-status")
     }
 
-    fn parse_header(raw: &Raw) -> Result<HeaderBloomStatus> {
-        match raw.one() {
-            Some(header_raw) => match str::from_utf8(header_raw) {
-                Ok("HIT") => Ok(HeaderBloomStatus(HeaderBloomStatusValue::Hit)),
-                Ok("MISS") => Ok(HeaderBloomStatus(HeaderBloomStatusValue::Miss)),
-                Ok("DIRECT") => Ok(HeaderBloomStatus(HeaderBloomStatusValue::Direct)),
-                Ok("REJECT") => Ok(HeaderBloomStatus(HeaderBloomStatusValue::Reject)),
-                Ok("OFFLINE") => Ok(HeaderBloomStatus(HeaderBloomStatusValue::Offline)),
-                _ => Err(Error::Header),
-            },
-            _ => Err(Error::Header),
-        }
-    }
-
-    fn fmt_header(&self, f: &mut Formatter) -> fmt::Result {
-        f.fmt_line(self)
+    pub fn to_header_value(&self) -> HeaderValue {
+        HeaderValue::from_static(self.0.to_str())
     }
 }
 
 impl fmt::Display for HeaderBloomStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.0.to_str(), f)
+        fmt::Display::fmt(self.0.to_str(), f)
     }
 }
 

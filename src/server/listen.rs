@@ -4,18 +4,11 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::server::Http;
-use std::cell::Cell;
-use std::sync::{Arc, Mutex};
-use tokio_core::reactor::Remote;
+use futures::Future;
+use hyper::Server;
 
 use super::handle::ServerRequestHandle;
 use crate::APP_CONF;
-
-lazy_static! {
-    pub static ref LISTEN_REMOTE: Arc<Mutex<Cell<Option<Remote>>>> =
-        Arc::new(Mutex::new(Cell::new(None)));
-}
 
 pub struct ServerListenBuilder;
 pub struct ServerListen;
@@ -28,23 +21,14 @@ impl ServerListenBuilder {
 
 impl ServerListen {
     pub fn run(&self) {
-        let addr = APP_CONF.server.inet;
-        let server = Http::new()
-            .bind(&addr, move || {
-                debug!("handled new request");
+        let server_inet = APP_CONF.server.inet;
 
-                Ok(ServerRequestHandle)
-            })
-            .expect("error binding server");
+        let server = Server::bind(&server_inet)
+            .serve(|| Ok::<_, hyper::Error>(ServerRequestHandle))
+            .map_err(|err| error!("server error: {}", err));
 
-        // Assign remote, used later on by the proxy client
-        LISTEN_REMOTE
-            .lock()
-            .unwrap()
-            .set(Some(server.handle().remote().to_owned()));
+        info!("listening on http://{}", server_inet);
 
-        info!("listening on http://{}", server.local_addr().unwrap());
-
-        server.run().expect("error running server");
+        hyper::rt::run(server);
     }
 }

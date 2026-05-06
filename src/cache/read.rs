@@ -21,10 +21,11 @@ pub enum CacheReadError {
 }
 
 type CacheReadResult = Result<String, CacheReadError>;
-type CacheReadResultFuture = Box<dyn Future<Item = CacheReadResult, Error = ()>>;
+type CacheReadResultFuture = Box<dyn Future<Item = CacheReadResult, Error = ()> + Send>;
 
 type CacheReadOptionalResult = Result<Option<String>, CacheReadError>;
-type CacheReadOptionalResultFuture = Box<dyn Future<Item = CacheReadOptionalResult, Error = ()>>;
+type CacheReadOptionalResultFuture =
+    Box<dyn Future<Item = CacheReadOptionalResult, Error = ()> + Send>;
 
 impl CacheRead {
     pub fn acquire_meta(shard: u8, key: &str, method: &Method) -> CacheReadResultFuture {
@@ -86,7 +87,7 @@ mod tests {
     #[should_panic]
     fn it_fails_acquiring_cache_meta() {
         assert!(
-            CacheRead::acquire_meta(0, "bloom:0:c:90d52bc6:f773d6f1", &Method::Get)
+            CacheRead::acquire_meta(0, "bloom:0:c:90d52bc6:f773d6f1", &Method::GET)
                 .poll()
                 .is_err()
         );

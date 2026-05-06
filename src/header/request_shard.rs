@@ -4,24 +4,23 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::header::{parsing, Formatter, Header, Raw};
-use hyper::Result;
+use hyper::header::{HeaderName, HeaderValue};
 use std::fmt;
 
 #[derive(Clone)]
 pub struct HeaderRequestBloomRequestShard(pub u8);
 
-impl Header for HeaderRequestBloomRequestShard {
-    fn header_name() -> &'static str {
-        "Bloom-Request-Shard"
+impl HeaderRequestBloomRequestShard {
+    pub fn header_name() -> HeaderName {
+        HeaderName::from_static("bloom-request-shard")
     }
 
-    fn parse_header(raw: &Raw) -> Result<HeaderRequestBloomRequestShard> {
-        parsing::from_one_raw_str(raw).map(HeaderRequestBloomRequestShard)
-    }
-
-    fn fmt_header(&self, f: &mut Formatter) -> fmt::Result {
-        f.fmt_line(self)
+    pub fn from_header_value(value: &HeaderValue) -> Option<Self> {
+        value
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<u8>().ok())
+            .map(HeaderRequestBloomRequestShard)
     }
 }
 

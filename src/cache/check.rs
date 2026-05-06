@@ -4,7 +4,7 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::{Headers, Method, StatusCode};
+use hyper::{HeaderMap, Method, StatusCode};
 
 use crate::header::response_ignore::HeaderResponseBloomResponseIgnore;
 
@@ -15,7 +15,7 @@ impl CacheCheck {
         Self::is_cacheable_method(method) == true
     }
 
-    pub fn from_response(method: &Method, status: &StatusCode, headers: &Headers) -> bool {
+    pub fn from_response(method: &Method, status: &StatusCode, headers: &HeaderMap) -> bool {
         Self::is_cacheable_method(method) == true
             && Self::is_cacheable_status(status) == true
             && Self::is_cacheable_response(headers) == true
@@ -23,49 +23,52 @@ impl CacheCheck {
 
     fn is_cacheable_method(method: &Method) -> bool {
         match *method {
-            Method::Get | Method::Head | Method::Options => true,
+            Method::GET | Method::HEAD | Method::OPTIONS => true,
             _ => false,
         }
     }
 
     fn is_cacheable_status(status: &StatusCode) -> bool {
         match *status {
-            StatusCode::Ok
-            | StatusCode::NonAuthoritativeInformation
-            | StatusCode::NoContent
-            | StatusCode::ResetContent
-            | StatusCode::PartialContent
-            | StatusCode::MultiStatus
-            | StatusCode::AlreadyReported
-            | StatusCode::MultipleChoices
-            | StatusCode::MovedPermanently
-            | StatusCode::Found
-            | StatusCode::SeeOther
-            | StatusCode::PermanentRedirect
-            | StatusCode::Unauthorized
-            | StatusCode::PaymentRequired
-            | StatusCode::Forbidden
-            | StatusCode::NotFound
-            | StatusCode::MethodNotAllowed
-            | StatusCode::Gone
-            | StatusCode::UriTooLong
-            | StatusCode::UnsupportedMediaType
-            | StatusCode::RangeNotSatisfiable
-            | StatusCode::ExpectationFailed
-            | StatusCode::ImATeapot
-            | StatusCode::Locked
-            | StatusCode::FailedDependency
-            | StatusCode::PreconditionRequired
-            | StatusCode::RequestHeaderFieldsTooLarge
-            | StatusCode::NotImplemented
-            | StatusCode::NotExtended => true,
+            StatusCode::OK
+            | StatusCode::NON_AUTHORITATIVE_INFORMATION
+            | StatusCode::NO_CONTENT
+            | StatusCode::RESET_CONTENT
+            | StatusCode::PARTIAL_CONTENT
+            | StatusCode::MULTI_STATUS
+            | StatusCode::ALREADY_REPORTED
+            | StatusCode::MULTIPLE_CHOICES
+            | StatusCode::MOVED_PERMANENTLY
+            | StatusCode::FOUND
+            | StatusCode::SEE_OTHER
+            | StatusCode::PERMANENT_REDIRECT
+            | StatusCode::UNAUTHORIZED
+            | StatusCode::PAYMENT_REQUIRED
+            | StatusCode::FORBIDDEN
+            | StatusCode::NOT_FOUND
+            | StatusCode::METHOD_NOT_ALLOWED
+            | StatusCode::GONE
+            | StatusCode::URI_TOO_LONG
+            | StatusCode::UNSUPPORTED_MEDIA_TYPE
+            | StatusCode::RANGE_NOT_SATISFIABLE
+            | StatusCode::EXPECTATION_FAILED
+            | StatusCode::IM_A_TEAPOT
+            | StatusCode::LOCKED
+            | StatusCode::FAILED_DEPENDENCY
+            | StatusCode::PRECONDITION_REQUIRED
+            | StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            | StatusCode::NOT_IMPLEMENTED
+            | StatusCode::NOT_EXTENDED => true,
             _ => false,
         }
     }
 
-    fn is_cacheable_response(headers: &Headers) -> bool {
+    fn is_cacheable_response(headers: &HeaderMap) -> bool {
         // Ignore responses with 'Bloom-Response-Ignore'
-        headers.has::<HeaderResponseBloomResponseIgnore>() == false
+        headers
+            .get(HeaderResponseBloomResponseIgnore::header_name())
+            .and_then(|value| HeaderResponseBloomResponseIgnore::from_header_value(value))
+            .is_none()
     }
 }
 
@@ -75,15 +78,15 @@ mod tests {
 
     #[test]
     fn it_asserts_valid_cacheable_method() {
-        assert_eq!(CacheCheck::is_cacheable_method(&Method::Get), true, "GET");
-        assert_eq!(CacheCheck::is_cacheable_method(&Method::Head), true, "HEAD");
+        assert_eq!(CacheCheck::is_cacheable_method(&Method::GET), true, "GET");
+        assert_eq!(CacheCheck::is_cacheable_method(&Method::HEAD), true, "HEAD");
         assert_eq!(
-            CacheCheck::is_cacheable_method(&Method::Options),
+            CacheCheck::is_cacheable_method(&Method::OPTIONS),
             true,
             "OPTIONS"
         );
         assert_eq!(
-            CacheCheck::is_cacheable_method(&Method::Post),
+            CacheCheck::is_cacheable_method(&Method::POST),
             false,
             "POST"
         );
@@ -92,22 +95,22 @@ mod tests {
     #[test]
     fn it_asserts_valid_cacheable_status() {
         assert_eq!(
-            CacheCheck::is_cacheable_status(&StatusCode::Ok),
+            CacheCheck::is_cacheable_status(&StatusCode::OK),
             true,
             "200 OK"
         );
         assert_eq!(
-            CacheCheck::is_cacheable_status(&StatusCode::Unauthorized),
+            CacheCheck::is_cacheable_status(&StatusCode::UNAUTHORIZED),
             true,
             "401 OK"
         );
         assert_eq!(
-            CacheCheck::is_cacheable_status(&StatusCode::BadRequest),
+            CacheCheck::is_cacheable_status(&StatusCode::BAD_REQUEST),
             false,
             "400 Bad Request"
         );
         assert_eq!(
-            CacheCheck::is_cacheable_status(&StatusCode::InternalServerError),
+            CacheCheck::is_cacheable_status(&StatusCode::INTERNAL_SERVER_ERROR),
             false,
             "500 Internal Server Error"
         );

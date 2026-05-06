@@ -4,27 +4,23 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use hyper::header::{Formatter, Header, Raw};
-use hyper::{Error, Result};
+use hyper::header::{HeaderName, HeaderValue};
 use std::fmt;
 
 #[derive(Clone)]
 pub struct HeaderResponseBloomResponseIgnore();
 
-impl Header for HeaderResponseBloomResponseIgnore {
-    fn header_name() -> &'static str {
-        "Bloom-Response-Ignore"
+impl HeaderResponseBloomResponseIgnore {
+    pub fn header_name() -> HeaderName {
+        HeaderName::from_static("bloom-response-ignore")
     }
 
-    fn parse_header(raw: &Raw) -> Result<HeaderResponseBloomResponseIgnore> {
-        if raw.eq("1") == true {
-            return Ok(HeaderResponseBloomResponseIgnore());
+    pub fn from_header_value(value: &HeaderValue) -> Option<Self> {
+        if value.as_bytes() == b"1" {
+            Some(HeaderResponseBloomResponseIgnore())
+        } else {
+            None
         }
-        Err(Error::Header)
-    }
-
-    fn fmt_header(&self, f: &mut Formatter) -> fmt::Result {
-        f.fmt_line(self)
     }
 }
 

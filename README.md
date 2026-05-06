@@ -142,6 +142,7 @@ Available configuration options are commented below, with allowed values:
 **[proxy]**
 
 * `shard_default` (type: _integer_, allowed: `0` to `15`, default: `0`) — Default shard index to use when no shard is specified in proxied HTTP requests
+* `tunnel_clients` (type: _integer_, allowed: `1` to `(2^16)-1`, default: `32`) — Number of tunnel clients to use for proxying requests
 
 **[[proxy.shard]]**
 
