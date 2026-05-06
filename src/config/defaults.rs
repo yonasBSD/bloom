@@ -26,10 +26,6 @@ pub fn proxy_shard_default() -> u8 {
     0
 }
 
-pub fn proxy_tunnel_clients() -> u16 {
-    32
-}
-
 pub fn proxy_shard_shard() -> u8 {
     0
 }
@@ -44,10 +40,6 @@ pub fn proxy_shard_port() -> u16 {
 
 pub fn cache_ttl_default() -> usize {
     600
-}
-
-pub fn cache_executor_pool() -> u16 {
-    64
 }
 
 pub fn cache_disable_read() -> bool {

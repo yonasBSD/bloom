@@ -4,8 +4,11 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use futures::Future;
+use std::convert::Infallible;
+
+use hyper::service::make_service_fn;
 use hyper::Server;
+use tokio::runtime::Runtime;
 
 use super::handle::ServerRequestHandle;
 use crate::APP_CONF;
@@ -23,12 +26,19 @@ impl ServerListen {
     pub fn run(&self) {
         let server_inet = APP_CONF.server.inet;
 
-        let server = Server::bind(&server_inet)
-            .serve(|| Ok::<_, hyper::Error>(ServerRequestHandle))
-            .map_err(|err| error!("server error: {}", err));
+        Runtime::new()
+            .expect("failed to create server runtime")
+            .block_on(async {
+                let service =
+                    make_service_fn(|_conn| async { Ok::<_, Infallible>(ServerRequestHandle) });
 
-        info!("listening on http://{}", server_inet);
+                let server = Server::bind(&server_inet).serve(service);
 
-        hyper::rt::run(server);
+                info!("listening on http://{}", server_inet);
+
+                if let Err(err) = server.await {
+                    error!("server general error: {}", err);
+                }
+            });
     }
 }

@@ -13,7 +13,6 @@ extern crate serde_derive;
 extern crate brotli;
 extern crate farmhash;
 extern crate futures;
-extern crate futures_cpupool;
 extern crate httparse;
 extern crate hyper;
 extern crate r2d2;

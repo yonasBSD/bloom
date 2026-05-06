@@ -50,9 +50,6 @@ pub struct ConfigProxy {
     #[serde(default = "defaults::proxy_shard_default")]
     pub shard_default: u8,
 
-    #[serde(default = "defaults::proxy_tunnel_clients")]
-    pub tunnel_clients: u16,
-
     pub shard: Vec<ConfigProxyShard>,
 }
 
@@ -75,9 +72,6 @@ pub struct ConfigProxyShard {
 pub struct ConfigCache {
     #[serde(default = "defaults::cache_ttl_default")]
     pub ttl_default: usize,
-
-    #[serde(default = "defaults::cache_executor_pool")]
-    pub executor_pool: u16,
 
     #[serde(
         default = "defaults::cache_disable_read",

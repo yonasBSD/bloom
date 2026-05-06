@@ -4,15 +4,14 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use brotli::{CompressorReader as BrotliCompressor, Decompressor as BrotliDecompressor};
-use futures::future::Future;
-use futures_cpupool::CpuPool;
-use r2d2::Pool;
-use r2d2_redis::RedisConnectionManager;
-use redis::{self, Commands, Value};
 use std::cmp;
 use std::io::Read;
 use std::time::Duration;
+
+use brotli::{CompressorReader as BrotliCompressor, Decompressor as BrotliDecompressor};
+use r2d2::Pool;
+use r2d2_redis::RedisConnectionManager;
+use redis::{self, Commands, Value};
 
 use super::route::ROUTE_PREFIX;
 use crate::APP_CONF;
@@ -23,10 +22,6 @@ static KEY_BODY: &'static str = "b";
 static KEY_FINGERPRINT: &'static str = "f";
 static KEY_TAGS: &'static str = "t";
 static KEY_TAGS_SEPARATOR: &'static str = ",";
-
-lazy_static! {
-    pub static ref EXECUTOR_POOL: CpuPool = CpuPool::new(APP_CONF.cache.executor_pool as usize);
-}
 
 pub struct CacheStoreBuilder;
 
@@ -49,9 +44,7 @@ pub enum CachePurgeVariant {
     Auth,
 }
 
-type CacheReadResultFuture = Box<dyn Future<Item = Option<String>, Error = CacheStoreError> + Send>;
 type CacheWriteResult = Result<String, (CacheStoreError, String)>;
-type CacheWriteResultFuture = Box<dyn Future<Item = CacheWriteResult, Error = ()> + Send>;
 type CachePurgeResult = Result<(), CacheStoreError>;
 
 impl CacheStoreBuilder {
@@ -103,10 +96,14 @@ impl CacheStoreBuilder {
 }
 
 impl CacheStore {
-    pub fn get_meta(&self, shard: u8, key: String) -> CacheReadResultFuture {
+    pub async fn get_meta(
+        &self,
+        shard: u8,
+        key: String,
+    ) -> Result<Option<String>, CacheStoreError> {
         let pool = self.pool.to_owned();
 
-        Box::new(EXECUTOR_POOL.spawn_fn(move || {
+        tokio::task::spawn_blocking(move || {
             get_cache_store_client_try!(pool, CacheStoreError::Disconnected, client {
                 match (*client).hget::<_, _, (Value, Value)>(key, (KEY_FINGERPRINT, KEY_TAGS)) {
                     Ok(value) => {
@@ -180,13 +177,15 @@ impl CacheStore {
                     _ => Err(CacheStoreError::Failed),
                 }
             })
-        }))
+        })
+        .await
+        .unwrap_or(Err(CacheStoreError::Failed))
     }
 
-    pub fn get_body(&self, key: String) -> CacheReadResultFuture {
+    pub async fn get_body(&self, key: String) -> Result<Option<String>, CacheStoreError> {
         let pool = self.pool.to_owned();
 
-        Box::new(EXECUTOR_POOL.spawn_fn(move || {
+        tokio::task::spawn_blocking(move || {
             get_cache_store_client_try!(pool, CacheStoreError::Disconnected, client {
                 match (*client).hget::<_, _, Value>(key, KEY_BODY) {
                     Ok(value) => {
@@ -242,10 +241,12 @@ impl CacheStore {
                     _ => Err(CacheStoreError::Failed),
                 }
             })
-        }))
+        })
+        .await
+        .unwrap_or(Err(CacheStoreError::Failed))
     }
 
-    pub fn set(
+    pub async fn set(
         &self,
         key: String,
         key_mask: String,
@@ -253,11 +254,11 @@ impl CacheStore {
         fingerprint: String,
         ttl: usize,
         key_tags: Vec<(String, String)>,
-    ) -> CacheWriteResultFuture {
+    ) -> CacheWriteResult {
         let pool = self.pool.to_owned();
 
-        Box::new(EXECUTOR_POOL.spawn_fn(move || {
-            Ok(get_cache_store_client_try!(
+        let result = tokio::task::spawn_blocking(move || -> CacheWriteResult {
+            get_cache_store_client_try!(
                 pool,
                 (CacheStoreError::Disconnected, fingerprint),
 
@@ -341,8 +342,11 @@ impl CacheStore {
                         }
                     }
                 }
-            ))
-        }))
+            )
+        })
+        .await;
+
+        result.unwrap_or(Err((CacheStoreError::Failed, String::new())))
     }
 
     pub fn purge_tag(

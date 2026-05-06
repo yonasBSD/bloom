@@ -4,8 +4,10 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
+use std::future::Future;
+use std::pin::Pin;
+
 use farmhash;
-use futures::{future, Future, Stream};
 use hyper::{Body, HeaderMap, Method, StatusCode, Version};
 
 use super::check::CacheCheck;
@@ -27,7 +29,7 @@ pub struct CacheWriteResult {
 }
 
 pub type CacheWriteResultFuture =
-    Box<dyn Future<Item = CacheWriteResult, Error = ProxyError> + Send>;
+    Pin<Box<dyn Future<Output = Result<CacheWriteResult, ProxyError>> + Send>>;
 
 impl CacheWrite {
     pub fn save(
@@ -41,27 +43,24 @@ impl CacheWrite {
         mut headers: HeaderMap,
         body: Body,
     ) -> CacheWriteResultFuture {
-        Box::new(
-            body.fold(Vec::new(), |mut accumulator, chunk| {
-                accumulator.extend_from_slice(&chunk[..]);
+        Box::pin(async move {
+            let bytes = hyper::body::to_bytes(body)
+                .await
+                .map_err(|err| -> ProxyError { Box::new(err) })?;
 
-                future::ok::<Vec<u8>, hyper::Error>(accumulator)
-            })
-            .map_err(|err| -> ProxyError { Box::new(err) })
-            .map(|raw_data| String::from_utf8(raw_data))
-            .and_then(move |body_result| {
-                if let Ok(body_value) = body_result {
-                    debug!("checking whether to write cache for key: {}", &key);
+            let body_result = String::from_utf8(bytes.to_vec());
 
-                    if APP_CONF.cache.disable_write == false
-                        && CacheCheck::from_response(&method, &status, &headers) == true
-                    {
-                        debug!("key: {} cacheable, writing cache", &key);
+            if let Ok(body_value) = body_result {
+                debug!("checking whether to write cache for key: {}", &key);
 
-                        // Acquire bucket from response, or fallback to no bucket
-                        let mut key_tags = match headers
-                            .get(HeaderResponseBloomResponseBuckets::header_name())
-                        {
+                if APP_CONF.cache.disable_write == false
+                    && CacheCheck::from_response(&method, &status, &headers) == true
+                {
+                    debug!("key: {} cacheable, writing cache", &key);
+
+                    // Acquire bucket from response, or fallback to no bucket
+                    let mut key_tags =
+                        match headers.get(HeaderResponseBloomResponseBuckets::header_name()) {
                             None => Vec::new(),
                             Some(value) => {
                                 match HeaderResponseBloomResponseBuckets::from_header_value(value) {
@@ -80,81 +79,77 @@ impl CacheWrite {
                             }
                         };
 
-                        key_tags.push(CacheRoute::gen_key_auth_from_hash(shard, &auth_hash));
+                    key_tags.push(CacheRoute::gen_key_auth_from_hash(shard, &auth_hash));
 
-                        // Acquire TTL from response, or fallback to default TTL
-                        let ttl = match headers.get(HeaderResponseBloomResponseTTL::header_name()) {
-                            None => APP_CONF.cache.ttl_default,
-                            Some(value) => {
-                                match HeaderResponseBloomResponseTTL::from_header_value(value) {
-                                    None => APP_CONF.cache.ttl_default,
-                                    Some(ttl) => ttl.0,
-                                }
+                    // Acquire TTL from response, or fallback to default TTL
+                    let ttl = match headers.get(HeaderResponseBloomResponseTTL::header_name()) {
+                        None => APP_CONF.cache.ttl_default,
+                        Some(value) => {
+                            match HeaderResponseBloomResponseTTL::from_header_value(value) {
+                                None => APP_CONF.cache.ttl_default,
+                                Some(ttl) => ttl.0,
                             }
-                        };
+                        }
+                    };
 
-                        // Clean headers before they get stored
-                        HeaderJanitor::clean(&mut headers);
+                    // Clean headers before they get stored
+                    HeaderJanitor::clean(&mut headers);
 
-                        // Generate storable value
-                        let body_string = format!(
-                            "{}\n{}\n{}",
-                            CacheWrite::generate_chain_banner(&version, &status),
-                            CacheWrite::generate_chain_headers(&headers),
-                            body_value
-                        );
+                    // Generate storable value
+                    let body_string = format!(
+                        "{}\n{}\n{}",
+                        CacheWrite::generate_chain_banner(&version, &status),
+                        CacheWrite::generate_chain_headers(&headers),
+                        body_value
+                    );
 
-                        // Process value fingerprint
-                        let fingerprint = Self::process_body_fingerprint(&body_string);
+                    // Process value fingerprint
+                    let fingerprint = Self::process_body_fingerprint(&body_string);
 
-                        // Write to cache
-                        Box::new(
-                            APP_CACHE_STORE
-                                .set(key, key_mask, body_string, fingerprint, ttl, key_tags)
-                                .map_err(|_| -> ProxyError {
-                                    Box::new(std::io::Error::new(
-                                        std::io::ErrorKind::Other,
-                                        "cache set error",
-                                    ))
-                                })
-                                .and_then(move |result| {
-                                    future::ok(match result {
-                                        Ok(fingerprint) => {
-                                            debug!("wrote cache");
+                    // Write to cache
+                    let result = APP_CACHE_STORE
+                        .set(key, key_mask, body_string, fingerprint, ttl, key_tags)
+                        .await;
 
-                                            CacheWriteResult {
-                                                body: Ok(body_value),
-                                                fingerprint: Some(fingerprint),
-                                                status: status,
-                                                headers: headers,
-                                            }
-                                        }
-                                        Err(forward) => {
-                                            warn!("could not write cache because: {:?}", forward.0);
+                    match result {
+                        Ok(fingerprint) => {
+                            debug!("wrote cache");
 
-                                            CacheWriteResult {
-                                                body: Err(Some(body_value)),
-                                                fingerprint: Some(forward.1),
-                                                status: status,
-                                                headers: headers,
-                                            }
-                                        }
-                                    })
-                                }),
-                        )
-                    } else {
-                        debug!("key: {} not cacheable, ignoring", &key);
+                            Ok(CacheWriteResult {
+                                body: Ok(body_value),
+                                fingerprint: Some(fingerprint),
+                                status,
+                                headers,
+                            })
+                        }
+                        Err(forward) => {
+                            warn!("could not write cache because: {:?}", forward.0);
 
-                        // Not cacheable, ignore
-                        Self::result_cache_write_error(Some(body_value), status, headers)
+                            Ok(CacheWriteResult {
+                                body: Err(Some(body_value)),
+                                fingerprint: Some(forward.1),
+                                status,
+                                headers,
+                            })
+                        }
                     }
                 } else {
-                    error!("failed unwrapping body value for key: {}, ignoring", &key);
+                    debug!("key: {} not cacheable, ignoring", &key);
 
-                    Self::result_cache_write_error(None, status, headers)
+                    // Not cacheable, ignore
+                    Ok(Self::result_cache_write_error(
+                        Some(body_value),
+                        status,
+                        headers,
+                    ))
                 }
-            }),
-        )
+            } else {
+                error!("failed unwrapping body value for key: {}, ignoring", &key);
+
+                // Not cacheable, ignore
+                Ok(Self::result_cache_write_error(None, status, headers))
+            }
+        })
     }
 
     fn generate_chain_banner(version: &Version, status: &StatusCode) -> String {
@@ -177,13 +172,13 @@ impl CacheWrite {
         body: Option<String>,
         status: StatusCode,
         headers: HeaderMap,
-    ) -> CacheWriteResultFuture {
-        Box::new(future::ok(CacheWriteResult {
+    ) -> CacheWriteResult {
+        CacheWriteResult {
             body: Err(body),
             fingerprint: None,
-            status: status,
-            headers: headers,
-        }))
+            status,
+            headers,
+        }
     }
 }
 
@@ -194,18 +189,20 @@ mod tests {
     #[test]
     #[should_panic]
     fn it_fails_saving_cache() {
-        assert!(CacheWrite::save(
-            "bloom:0:c:90d52bc6:f773d6f1".to_string(),
-            "90d52bc6:f773d6f1".to_string(),
-            "90d52bc6".to_string(),
-            0,
-            Method::GET,
-            Version::HTTP_11,
-            StatusCode::OK,
-            HeaderMap::new(),
-            Body::empty(),
-        )
-        .poll()
-        .is_err());
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            assert!(CacheWrite::save(
+                "bloom:0:c:90d52bc6:f773d6f1".to_string(),
+                "90d52bc6:f773d6f1".to_string(),
+                "90d52bc6".to_string(),
+                0,
+                Method::GET,
+                Version::HTTP_11,
+                StatusCode::OK,
+                HeaderMap::new(),
+                Body::empty(),
+            )
+            .await
+            .is_err());
+        });
     }
 }

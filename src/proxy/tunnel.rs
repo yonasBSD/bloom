@@ -4,11 +4,13 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use futures::{future, Future};
+use std::future::Future;
+use std::pin::Pin;
+use std::time::Duration;
+
 use hyper::client::HttpConnector;
 use hyper::header::HeaderMap;
 use hyper::{Body, Client, Method, Request, Response, Uri};
-use std::time::Duration;
 
 use super::serve::ProxyError;
 use crate::APP_CONF;
@@ -26,13 +28,13 @@ thread_local! {
 
 pub struct ProxyTunnel;
 
-pub type ProxyTunnelFuture = Box<dyn Future<Item = Response<Body>, Error = ProxyError> + Send>;
+pub type ProxyTunnelFuture =
+    Pin<Box<dyn Future<Output = Result<Response<Body>, ProxyError>> + Send>>;
 
 fn make_client() -> Client<HttpConnector> {
     Client::builder()
-        .keep_alive(true)
-        .keep_alive_timeout(Duration::from_secs(CLIENT_KEEP_ALIVE_TIMEOUT_SECONDS))
-        .build(HttpConnector::new(APP_CONF.proxy.tunnel_clients as usize))
+        .pool_idle_timeout(Duration::from_secs(CLIENT_KEEP_ALIVE_TIMEOUT_SECONDS))
+        .build(HttpConnector::new())
 }
 
 fn map_shards() -> [Option<Uri>; MAX_SHARDS as usize] {
@@ -75,11 +77,11 @@ impl ProxyTunnel {
                     let mut tunnel_uri = format!(
                         "{}://{}{}",
                         shard_uri
-                            .scheme_part()
+                            .scheme()
                             .map(|scheme| scheme.as_str())
                             .unwrap_or("http"),
                         shard_uri
-                            .authority_part()
+                            .authority()
                             .map(|authority| authority.as_str())
                             .unwrap_or(""),
                         uri.path()
@@ -112,21 +114,23 @@ impl ProxyTunnel {
                             *tunnel_req.headers_mut() = headers.clone();
 
                             TUNNEL_CLIENT.with(|client| {
-                                Box::new(
-                                    client
-                                        .request(tunnel_req)
-                                        .map_err(|err| -> ProxyError { Box::new(err) }),
-                                ) as ProxyTunnelFuture
+                                let request = client.request(tunnel_req);
+
+                                Box::pin(async move {
+                                    request.await.map_err(|err| -> ProxyError { Box::new(err) })
+                                }) as ProxyTunnelFuture
                             })
                         }
-                        Err(_) => Box::new(future::err(Self::make_proxy_err("invalid tunnel uri"))),
+                        Err(_) => {
+                            Box::pin(async move { Err(Self::make_proxy_err("invalid tunnel uri")) })
+                        }
                     }
                 }
-                None => Box::new(future::err(Self::make_proxy_err("shard not configured"))),
+                None => Box::pin(async move { Err(Self::make_proxy_err("shard not configured")) }),
             }
         } else {
             // Shard out of bounds
-            Box::new(future::err(Self::make_proxy_err("shard out of bounds")))
+            Box::pin(async move { Err(Self::make_proxy_err("shard out of bounds")) })
         }
     }
 

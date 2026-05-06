@@ -4,7 +4,6 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use futures::future::{self, Future};
 use hyper::Method;
 
 use super::check::CacheCheck;
@@ -21,61 +20,50 @@ pub enum CacheReadError {
 }
 
 type CacheReadResult = Result<String, CacheReadError>;
-type CacheReadResultFuture = Box<dyn Future<Item = CacheReadResult, Error = ()> + Send>;
-
 type CacheReadOptionalResult = Result<Option<String>, CacheReadError>;
-type CacheReadOptionalResultFuture =
-    Box<dyn Future<Item = CacheReadOptionalResult, Error = ()> + Send>;
 
 impl CacheRead {
-    pub fn acquire_meta(shard: u8, key: &str, method: &Method) -> CacheReadResultFuture {
-        if APP_CONF.cache.disable_read == false && CacheCheck::from_request(&method) == true {
+    pub async fn acquire_meta(
+        shard: u8,
+        key: &str,
+        method: &Method,
+    ) -> Result<CacheReadResult, ()> {
+        if APP_CONF.cache.disable_read == false && CacheCheck::from_request(method) == true {
             debug!("key: {} cacheable, reading cache", &key);
 
-            Box::new(
-                APP_CACHE_STORE
-                    .get_meta(shard, key.to_string())
-                    .and_then(|acquired| {
-                        if let Some(result) = acquired {
-                            future::ok(Ok(result))
-                        } else {
-                            info!("acquired empty meta value from cache");
+            match APP_CACHE_STORE.get_meta(shard, key.to_string()).await {
+                Ok(Some(result)) => Ok(Ok(result)),
+                Ok(None) => {
+                    info!("acquired empty meta value from cache");
 
-                            future::ok(Err(CacheReadError::Empty))
-                        }
-                    })
-                    .or_else(|err| {
-                        error!("could not acquire meta value from cache because: {:?}", err);
+                    Ok(Err(CacheReadError::Empty))
+                }
+                Err(err) => {
+                    error!("could not acquire meta value from cache because: {:?}", err);
 
-                        future::ok(Err(CacheReadError::StoreFailure))
-                    }),
-            )
+                    Ok(Err(CacheReadError::StoreFailure))
+                }
+            }
         } else {
             debug!("key: {} not cacheable, ignoring (will pass through)", &key);
-
-            Box::new(future::ok(Err(CacheReadError::PassThrough)))
+            Ok(Err(CacheReadError::PassThrough))
         }
     }
 
-    pub fn acquire_body(key: &str) -> CacheReadOptionalResultFuture {
-        Box::new(
-            APP_CACHE_STORE
-                .get_body(key.to_string())
-                .and_then(|acquired| {
-                    if let Some(result) = acquired {
-                        future::ok(Ok(Some(result)))
-                    } else {
-                        info!("acquired empty body value from cache");
+    pub async fn acquire_body(key: &str) -> Result<CacheReadOptionalResult, ()> {
+        match APP_CACHE_STORE.get_body(key.to_string()).await {
+            Ok(Some(result)) => Ok(Ok(Some(result))),
+            Ok(None) => {
+                info!("acquired empty body value from cache");
 
-                        future::ok(Err(CacheReadError::Empty))
-                    }
-                })
-                .or_else(|err| {
-                    error!("could not acquire body value from cache because: {:?}", err);
+                Ok(Err(CacheReadError::Empty))
+            }
+            Err(err) => {
+                error!("could not acquire body value from cache because: {:?}", err);
 
-                    future::ok(Err(CacheReadError::StoreFailure))
-                }),
-        )
+                Ok(Err(CacheReadError::StoreFailure))
+            }
+        }
     }
 }
 
@@ -86,18 +74,22 @@ mod tests {
     #[test]
     #[should_panic]
     fn it_fails_acquiring_cache_meta() {
-        assert!(
-            CacheRead::acquire_meta(0, "bloom:0:c:90d52bc6:f773d6f1", &Method::GET)
-                .poll()
-                .is_err()
-        );
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            assert!(
+                CacheRead::acquire_meta(0, "bloom:0:c:90d52bc6:f773d6f1", &Method::GET)
+                    .await
+                    .is_err()
+            );
+        });
     }
 
     #[test]
     #[should_panic]
     fn it_fails_acquiring_cache_body() {
-        assert!(CacheRead::acquire_body("bloom:0:c:90d52bc6:f773d6f1")
-            .poll()
-            .is_err());
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            assert!(CacheRead::acquire_body("bloom:0:c:90d52bc6:f773d6f1")
+                .await
+                .is_err());
+        });
     }
 }
