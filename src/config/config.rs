@@ -106,15 +106,6 @@ pub struct ConfigRedis {
     #[serde(default = "defaults::redis_database")]
     pub database: u8,
 
-    #[serde(default = "defaults::redis_pool_size")]
-    pub pool_size: u32,
-
-    #[serde(default = "defaults::redis_max_lifetime_seconds")]
-    pub max_lifetime_seconds: u64,
-
-    #[serde(default = "defaults::redis_idle_timeout_seconds")]
-    pub idle_timeout_seconds: u64,
-
     #[serde(default = "defaults::redis_connection_timeout_seconds")]
     pub connection_timeout_seconds: u64,
 

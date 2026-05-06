@@ -162,9 +162,6 @@ Available configuration options are commented below, with allowed values:
 * `port` (type: _integer_, allowed: TCP port, default: `6379`) — Target Redis TCP port
 * `password` (type: _string_, allowed: password values, default: none) — Redis password (if no password, dont set this key)
 * `database` (type: _integer_, allowed: `0` to `255`, default: `0`) — Target Redis database
-* `pool_size` (type: _integer_, allowed: `0` to `(2^32)-1`, default: `80`) — Redis connection pool size
-* `max_lifetime_seconds` (type: _integer_, allowed: seconds, default: `60`) — Maximum lifetime of a connection to Redis (you want it below 5 minutes, as this affects the reconnect delay to Redis if a connection breaks)
-* `idle_timeout_seconds` (type: _integer_, allowed: seconds, default: `600`) — Timeout of idle/dead pool connections to Redis
 * `connection_timeout_seconds` (type: _integer_, allowed: seconds, default: `1`) — Timeout in seconds to consider Redis dead and emit a `DIRECT` connection to API without using cache (keep this low, as when Redis is down it dictates how much time to wait before ignoring Redis response and proxying directly)
 * `max_key_size` (type: _integer_, allowed: bytes, default: `256000`) — Maximum data size in bytes to store in Redis for a key (safeguard to prevent very large responses to be cached)
 * `max_key_expiration` (type: _integer_, allowed: seconds, default: `2592000`) — Maximum TTL for a key cached in Redis (prevents erroneous `Bloom-Response-TTL` values)
@@ -367,8 +364,6 @@ We get the following `htop` feedback on a server running Bloom at such load:
 ![htop](https://valeriansaliou.github.io/bloom/images/htop.png)
 
 **As you can see, Bloom consumes only a fraction of the CPU time (less than 5%) for a small RAM footprint (~5% which is ~25MB)**. On such a small server, we can predict Bloom could scale to even higher rates (eg. 10k RPS) without putting too much pressure on the system (the underlying NodeJS API worker would be overheating first as it's much heavier than Bloom).
-
-If you want Bloom to handle very high RPS, make sure to adjust the `redis.pool_size` option to higher values (which may limit your RPS if you have a few milliseconds of latency on your Redis link — as Redis connections are blocking).
 
 ## How does it deal with authenticated routes?
 

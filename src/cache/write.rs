@@ -194,23 +194,21 @@ impl CacheWrite {
 mod tests {
     use super::*;
 
-    #[test]
+    #[tokio::test]
     #[should_panic]
-    fn it_fails_saving_cache() {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            assert!(CacheWrite::save(
-                "bloom:0:c:90d52bc6:f773d6f1".to_string(),
-                "90d52bc6:f773d6f1".to_string(),
-                "90d52bc6".to_string(),
-                0,
-                Method::GET,
-                Version::HTTP_11,
-                StatusCode::OK,
-                HeaderMap::new(),
-                http_body_util::Full::<bytes::Bytes>::new(bytes::Bytes::new()),
-            )
-            .await
-            .is_err());
-        });
+    async fn it_fails_saving_cache() {
+        assert!(CacheWrite::save(
+            "bloom:0:c:90d52bc6:f773d6f1".to_string(),
+            "90d52bc6:f773d6f1".to_string(),
+            "90d52bc6".to_string(),
+            0,
+            Method::GET,
+            Version::HTTP_11,
+            StatusCode::OK,
+            HeaderMap::new(),
+            http_body_util::Full::<bytes::Bytes>::new(bytes::Bytes::new()),
+        )
+        .await
+        .is_err());
     }
 }

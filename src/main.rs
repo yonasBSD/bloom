@@ -15,7 +15,6 @@ extern crate farmhash;
 extern crate futures;
 extern crate httparse;
 extern crate hyper;
-extern crate r2d2;
 extern crate rand;
 extern crate redis;
 extern crate regex;

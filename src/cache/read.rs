@@ -71,25 +71,21 @@ impl CacheRead {
 mod tests {
     use super::*;
 
-    #[test]
+    #[tokio::test]
     #[should_panic]
-    fn it_fails_acquiring_cache_meta() {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            assert!(
-                CacheRead::acquire_meta(0, "bloom:0:c:90d52bc6:f773d6f1", &Method::GET)
-                    .await
-                    .is_err()
-            );
-        });
+    async fn it_fails_acquiring_cache_meta() {
+        assert!(
+            CacheRead::acquire_meta(0, "bloom:0:c:90d52bc6:f773d6f1", &Method::GET)
+                .await
+                .is_err()
+        );
     }
 
-    #[test]
+    #[tokio::test]
     #[should_panic]
-    fn it_fails_acquiring_cache_body() {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            assert!(CacheRead::acquire_body("bloom:0:c:90d52bc6:f773d6f1")
-                .await
-                .is_err());
-        });
+    async fn it_fails_acquiring_cache_body() {
+        assert!(CacheRead::acquire_body("bloom:0:c:90d52bc6:f773d6f1")
+            .await
+            .is_err());
     }
 }
