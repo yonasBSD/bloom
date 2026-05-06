@@ -4,10 +4,9 @@
 // Copyright: 2017, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use std::convert::Infallible;
-
-use hyper::service::make_service_fn;
-use hyper::Server;
+use hyper::server::conn::http1;
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 
 use super::handle::ServerRequestHandle;
@@ -29,15 +28,30 @@ impl ServerListen {
         Runtime::new()
             .expect("failed to create server runtime")
             .block_on(async {
-                let service =
-                    make_service_fn(|_conn| async { Ok::<_, Infallible>(ServerRequestHandle) });
-
-                let server = Server::bind(&server_inet).serve(service);
+                let listener = TcpListener::bind(server_inet)
+                    .await
+                    .expect("failed to bind server tcp listener");
 
                 info!("listening on http://{}", server_inet);
 
-                if let Err(err) = server.await {
-                    error!("server general error: {}", err);
+                loop {
+                    match listener.accept().await {
+                        Ok((stream, _)) => {
+                            let io = TokioIo::new(stream);
+
+                            tokio::spawn(async move {
+                                if let Err(err) = http1::Builder::new()
+                                    .serve_connection(io, ServerRequestHandle)
+                                    .await
+                                {
+                                    error!("server connection error: {}", err);
+                                }
+                            });
+                        }
+                        Err(err) => {
+                            error!("server accept error: {}", err);
+                        }
+                    }
                 }
             });
     }

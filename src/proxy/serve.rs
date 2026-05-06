@@ -7,9 +7,12 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use bytes::Bytes;
+use http_body_util::Full;
 use httparse;
+use hyper::body::Incoming;
 use hyper::header::{self, HeaderMap, HeaderName, HeaderValue};
-use hyper::{Body, Method, Request, Response, StatusCode, Uri, Version};
+use hyper::{Method, Request, Response, StatusCode, Uri, Version};
 use itertools::{Itertools, Position};
 
 use super::header::ProxyHeader;
@@ -23,15 +26,15 @@ use crate::LINE_FEED;
 
 pub struct ProxyServe;
 
-pub type ProxyError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
 const CACHED_PARSE_MAX_HEADERS: usize = 100;
 
+pub type ProxyServeError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
 pub type ProxyServeResponseFuture =
-    Pin<Box<dyn Future<Output = Result<Response<Body>, ProxyError>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<Response<Full<Bytes>>, ProxyServeError>> + Send>>;
 
 impl ProxyServe {
-    pub fn handle(req: Request<Body>) -> ProxyServeResponseFuture {
+    pub fn handle(req: Request<Incoming>) -> ProxyServeResponseFuture {
         info!("handled request: {} on {}", req.method(), req.uri().path());
 
         match req.method() {
@@ -46,11 +49,11 @@ impl ProxyServe {
         }
     }
 
-    fn accept(req: Request<Body>) -> ProxyServeResponseFuture {
+    fn accept(req: Request<Incoming>) -> ProxyServeResponseFuture {
         Self::tunnel(req)
     }
 
-    fn reject(req: Request<Body>, status: StatusCode) -> ProxyServeResponseFuture {
+    fn reject(req: Request<Incoming>, status: StatusCode) -> ProxyServeResponseFuture {
         let mut headers = HeaderMap::new();
 
         headers.insert(
@@ -66,7 +69,7 @@ impl ProxyServe {
         ))
     }
 
-    fn tunnel(req: Request<Body>) -> ProxyServeResponseFuture {
+    fn tunnel(req: Request<Incoming>) -> ProxyServeResponseFuture {
         let (parts, body) = req.into_parts();
 
         let method = parts.method;
@@ -195,14 +198,15 @@ impl ProxyServe {
         uri: Uri,
         version: Version,
         headers: HeaderMap,
-        body: Body,
-    ) -> Result<Response<Body>, ProxyError> {
+        body: Incoming,
+    ) -> Result<Response<Full<Bytes>>, ProxyServeError> {
         // Clone method value for closures. Sadly, it looks like Rust borrow \
         //   checker doesnt discriminate properly on this check.
         let method_success = method.to_owned();
         let method_failure = method.to_owned();
 
-        let tunnel_result = ProxyTunnel::run(&method, &uri, &headers, body, shard).await;
+        let tunnel_result: Result<_, ProxyServeError> =
+            ProxyTunnel::run(&method, &uri, &headers, body, shard).await;
 
         match tunnel_result {
             Ok(tunnel_res) => {
@@ -267,10 +271,10 @@ impl ProxyServe {
         req_uri: Uri,
         req_version: Version,
         req_headers: HeaderMap,
-        req_body: Body,
+        req_body: Incoming,
         res_fingerprint: String,
         res_string: Option<String>,
-    ) -> Result<Response<Body>, ProxyError> {
+    ) -> Result<Response<Full<Bytes>>, ProxyServeError> {
         // Response modified? (non-empty body)
         if let Some(res_string_value) = res_string {
             let mut headers = [httparse::EMPTY_HEADER; CACHED_PARSE_MAX_HEADERS];
@@ -348,7 +352,7 @@ impl ProxyServe {
         bloom_status: HeaderBloomStatusValue,
         body_string: String,
         fingerprint: Option<String>,
-    ) -> Result<Response<Body>, ProxyError> {
+    ) -> Result<Response<Full<Bytes>>, ProxyServeError> {
         // Process ETag for content?
         if let Some(fingerprint_value) = fingerprint {
             ProxyHeader::set_etag(&mut headers, &fingerprint_value);
@@ -362,7 +366,7 @@ impl ProxyServe {
         Self::respond(method.clone(), *status, headers, body_string).await
     }
 
-    async fn dispatch_failure(method: &Method) -> Result<Response<Body>, ProxyError> {
+    async fn dispatch_failure(method: &Method) -> Result<Response<Full<Bytes>>, ProxyServeError> {
         let status = StatusCode::BAD_GATEWAY;
 
         let mut headers = HeaderMap::new();
@@ -398,7 +402,7 @@ impl ProxyServe {
         body
     }
 
-    fn make_proxy_error(msg: &'static str) -> ProxyError {
+    fn make_proxy_error(msg: &'static str) -> ProxyServeError {
         Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg))
     }
 
@@ -407,12 +411,12 @@ impl ProxyServe {
         status: StatusCode,
         headers: HeaderMap,
         body_string: String,
-    ) -> Result<Response<Body>, ProxyError> {
+    ) -> Result<Response<Full<Bytes>>, ProxyServeError> {
         let body = match method {
             Method::GET | Method::POST | Method::PATCH | Method::PUT | Method::DELETE => {
-                Body::from(body_string)
+                Full::new(Bytes::from(body_string))
             }
-            _ => Body::empty(),
+            _ => Full::new(Bytes::new()),
         };
 
         let mut response = Response::new(body);

@@ -8,11 +8,16 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use hyper::client::HttpConnector;
+use bytes::Bytes;
+use http_body_util::{combinators::BoxBody, BodyExt, Empty};
+use hyper::body::Incoming;
 use hyper::header::HeaderMap;
-use hyper::{Body, Client, Method, Request, Response, Uri};
+use hyper::{Method, Request, Response, Uri};
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 
-use super::serve::ProxyError;
+use super::serve::ProxyServeError;
 use crate::APP_CONF;
 
 const MAX_SHARDS: u8 = 16;
@@ -23,16 +28,18 @@ lazy_static! {
 }
 
 thread_local! {
-    static TUNNEL_CLIENT: Client<HttpConnector> = make_client();
+    static TUNNEL_CLIENT: Client<HttpConnector, ProxyTunnelRequestBody> = make_client();
 }
 
 pub struct ProxyTunnel;
 
-pub type ProxyTunnelFuture =
-    Pin<Box<dyn Future<Output = Result<Response<Body>, ProxyError>> + Send>>;
+type ProxyTunnelRequestBody = BoxBody<Bytes, ProxyServeError>;
 
-fn make_client() -> Client<HttpConnector> {
-    Client::builder()
+type ProxyTunnelFuture =
+    Pin<Box<dyn Future<Output = Result<Response<Incoming>, ProxyServeError>> + Send>>;
+
+fn make_client() -> Client<HttpConnector, ProxyTunnelRequestBody> {
+    Client::builder(TokioExecutor::new())
         .pool_idle_timeout(Duration::from_secs(CLIENT_KEEP_ALIVE_TIMEOUT_SECONDS))
         .build(HttpConnector::new())
 }
@@ -67,7 +74,7 @@ impl ProxyTunnel {
         method: &Method,
         uri: &Uri,
         headers: &HeaderMap,
-        body: Body,
+        body: Incoming,
         shard: u8,
     ) -> ProxyTunnelFuture {
         if shard < MAX_SHARDS {
@@ -97,11 +104,11 @@ impl ProxyTunnel {
                             // Forward body?
                             // Notice: HTTP DELETE is not forbidden per-spec to hold a request \
                             //   body, even if it is not commonly used. Hence why we forward it.
-                            let req_body = match method {
+                            let req_body: ProxyTunnelRequestBody = match method {
                                 &Method::POST | &Method::PATCH | &Method::PUT | &Method::DELETE => {
-                                    body
+                                    body.map_err(|err| Box::new(err) as ProxyServeError).boxed()
                                 }
-                                _ => Body::empty(),
+                                _ => Empty::new().map_err(|_| unreachable!()).boxed(),
                             };
 
                             let mut tunnel_req = Request::new(req_body);
@@ -117,7 +124,9 @@ impl ProxyTunnel {
                                 let request = client.request(tunnel_req);
 
                                 Box::pin(async move {
-                                    request.await.map_err(|err| -> ProxyError { Box::new(err) })
+                                    request
+                                        .await
+                                        .map_err(|err| -> ProxyServeError { Box::new(err) })
                                 }) as ProxyTunnelFuture
                             })
                         }
@@ -134,7 +143,7 @@ impl ProxyTunnel {
         }
     }
 
-    fn make_proxy_err(msg: &'static str) -> ProxyError {
+    fn make_proxy_err(msg: &'static str) -> ProxyServeError {
         Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg))
     }
 }

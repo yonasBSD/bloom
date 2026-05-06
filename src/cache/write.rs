@@ -8,14 +8,15 @@ use std::future::Future;
 use std::pin::Pin;
 
 use farmhash;
-use hyper::{Body, HeaderMap, Method, StatusCode, Version};
+use http_body_util::BodyExt;
+use hyper::{HeaderMap, Method, StatusCode, Version};
 
 use super::check::CacheCheck;
 use super::route::CacheRoute;
 use crate::header::janitor::HeaderJanitor;
 use crate::header::response_buckets::HeaderResponseBloomResponseBuckets;
 use crate::header::response_ttl::HeaderResponseBloomResponseTTL;
-use crate::proxy::serve::ProxyError;
+use crate::proxy::serve::ProxyServeError;
 use crate::APP_CACHE_STORE;
 use crate::APP_CONF;
 
@@ -28,11 +29,11 @@ pub struct CacheWriteResult {
     pub headers: HeaderMap,
 }
 
-pub type CacheWriteResultFuture =
-    Pin<Box<dyn Future<Output = Result<CacheWriteResult, ProxyError>> + Send>>;
+type CacheWriteResultFuture =
+    Pin<Box<dyn Future<Output = Result<CacheWriteResult, ProxyServeError>> + Send>>;
 
 impl CacheWrite {
-    pub fn save(
+    pub fn save<B>(
         key: String,
         key_mask: String,
         auth_hash: String,
@@ -41,12 +42,19 @@ impl CacheWrite {
         version: Version,
         status: StatusCode,
         mut headers: HeaderMap,
-        body: Body,
-    ) -> CacheWriteResultFuture {
+        body: B,
+    ) -> CacheWriteResultFuture
+    where
+        B: hyper::body::Body + Send + 'static,
+        B::Data: bytes::Buf + Send,
+        B::Error: std::error::Error + Send + Sync + 'static,
+    {
         Box::pin(async move {
-            let bytes = hyper::body::to_bytes(body)
+            let bytes = body
+                .collect()
                 .await
-                .map_err(|err| -> ProxyError { Box::new(err) })?;
+                .map_err(|err| -> ProxyServeError { Box::new(err) })?
+                .to_bytes();
 
             let body_result = String::from_utf8(bytes.to_vec());
 
@@ -199,7 +207,7 @@ mod tests {
                 Version::HTTP_11,
                 StatusCode::OK,
                 HeaderMap::new(),
-                Body::empty(),
+                http_body_util::Full::<bytes::Bytes>::new(bytes::Bytes::new()),
             )
             .await
             .is_err());
