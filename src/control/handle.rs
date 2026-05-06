@@ -5,7 +5,7 @@
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
 use rand::distr::Alphanumeric;
-use rand::{self, Rng};
+use rand::{self, RngExt};
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::result::Result;
